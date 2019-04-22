@@ -1,0 +1,84 @@
+CONSTANT	outp_worker_select,	00000001'b
+CONSTANT 	outp_self_status, 	00000010'b
+CONSTANT 	outp_self_data,		00000011'b
+CONSTANT	outp_uart_data,		00000100'b
+CONSTANT	outp_mem_intf_addr,	00000101'b
+CONSTANT	outp_mem_intf_data_p0,	00000110'b
+CONSTANT	outp_mem_intf_data_p1,	00000111'b
+
+CONSTANT	inp_system_status,	00000001'b
+CONSTANT	inp_worker_data,	00000010'b
+CONSTANT	inp_uart_data,		00000101'b
+CONSTANT	inp_uart_status,	00000110'b
+CONSTANT	inp_mem_intf_data,	00000111'b
+
+CONSTANT 	tx_data_present, 	00100000'b
+CONSTANT 	tx_buffer_half,  	00010000'b
+CONSTANT 	tx_buffer_full,  	00001000'b
+CONSTANT	rx_data_present, 	00000100'b
+CONSTANT	rx_buffer_half, 	00000010'b
+CONSTANT 	rx_buffer_full,  	00000001'b
+
+CONSTANT	send_done,		10000000'b
+CONSTANT	request_sync,		00000001'b
+
+; register mapping
+; s0 - stack pointer
+; s1 - data
+
+init:
+	LOAD	s0,	00
+	LOAD	s1,	00
+ 
+wait_for_uart:
+	; get some bytes from uart
+	INPUT		s1,		inp_uart_status
+	AND		s1,		rx_data_present
+	JUMP		Z,		wait_for_uart
+	INPUT		s1,		inp_uart_data
+	STORE		s1,		(s0)
+	ADD		s0,		01
+	COMPARE		s0,		40
+	JUMP		NZ,		wait_for_uart
+
+data_transfer:
+	OUTPUTK		00000001'b,	outp_worker_select
+	CALL		send_data
+
+finish:
+	JUMP		finish
+
+send_data:
+	OUTPUTK		request_sync,	outp_self_status
+	ADD		s0,		00			; processor should go to sleep here
+	ADD		s0,		00			; ish
+	OUTPUTK		00,		outp_self_status
+
+send_data_loop:
+	ADD		sF,		00			; need to waste a cycle
+	SUB		s0,		01
+	FETCH		s1,		(s0)
+	OUTPUT		s1,		outp_self_data
+	COMPARE		s0,		00
+	JUMP		NZ,		send_data_loop
+	OUTPUTK		send_done,	outp_self_status
+	RETURN
+
+recv_data:
+	OUTPUTK		request_sync,	outp_self_status
+	ADD		sF,		00			; process should go to sleep here
+	ADD		sF,		00			; ish
+	OUTPUTK		00,		outp_self_status
+	ADD		sF,		00			;
+	ADD		sF,		00			; waste 4 instructions so transfer lines up
+	ADD		sF,		00			;
+	ADD		sF,		00			;
+
+recv_data_loop:
+	INPUT		s1,		inp_worker_data
+	STORE		s1,		(s0)
+	ADD		s0,		01
+	INPUT		s1,		inp_system_status
+	AND		s1,		send_done
+	JUMP		Z,		recv_data_loop
+	RETURN

@@ -1,0 +1,150 @@
+CONSTANT	outp_mem_intf_addr,	00000001'b
+CONSTANT	outp_mem_intf_data_p0,	00000010'b
+CONSTANT	outp_mem_intf_data_p1,	00000011'b
+CONSTANT	outp_self_status,	00000100'b
+CONSTANT	outp_self_data,		00000101'b
+
+CONSTANT	inp_mem_intf_data,	00000001'b
+CONSTANT	inp_system_status,	00000010'b
+CONSTANT	inp_control_data,	00000011'b
+
+CONSTANT	send_done,		10000000'b
+CONSTANT	request_sync,		00000001'b
+
+; register mapping
+; s0 - stack pointer
+; s1 - data
+; s2 - worker index
+; s3 - msa address
+; s4 - rc address
+
+init:
+	LOAD		s0,		00
+	LOAD		s1,		00
+	LOAD		s2,		00
+	CALL		recv_data
+
+msa_init:
+	; set MSA mode
+	OUTPUTK		00000000'b,	outp_self_status
+
+start_msa:
+	; load data bytes
+	SUB		s0,		01
+	FETCH		s1,		(s0)
+	OUTPUT		s1,		outp_mem_intf_data_p1
+	SUB		s0,		01
+	FETCH		s1,		(s0)
+	OUTPUT		s1,		outp_mem_intf_data_p1
+	SUB		s0,		01
+	FETCH		s1,		(s0)
+	OUTPUT		s1,		outp_mem_intf_data_p1
+	SUB		s0,		01
+	FETCH		s1,		(s0)
+	OUTPUT		s1,		outp_mem_intf_data_p1
+
+	; load address bytes
+	OUTPUT		s2,		outp_mem_intf_addr
+	OUTPUTK		00000010'b,	outp_mem_intf_addr
+
+	; increment address and loop
+	ADD		s2,		01
+	COMPARE		s0,		00
+	JUMP		NZ,		start_msa
+
+extend_msa:
+	; get i - 15 element
+	LOAD		s3,		s2
+	SUB		s3,		0F
+	OUTPUT		s3,		outp_mem_intf_addr
+	OUTPUTK		00000010'b,	outp_mem_intf_addr
+
+	; get i - 2 element
+	LOAD		s3,		s2
+	SUB		s3,		02
+	OUTPUT		s3,		outp_mem_intf_addr
+	OUTPUTK		00000010'b,	outp_mem_intf_addr
+
+	; get i - 16 element
+	LOAD		s3,		s2
+	SUB		s3,		10
+	OUTPUT		s3,		outp_mem_intf_addr
+	OUTPUTK		00000010'b,	outp_mem_intf_addr
+
+	; get i - 7 element
+	LOAD		s3,		s2
+	SUB		s3,		07
+	OUTPUT		s3,		outp_mem_intf_addr
+	OUTPUTK		00000010'b,	outp_mem_intf_addr
+
+	; output the address
+	LOAD		s3,		s2
+	ADD		s2,		01			; perform these early so system has time for reset
+	COMPARE		s2,		40
+	OUTPUT		s3,		outp_mem_intf_addr
+	OUTPUTK		00000010'b,	outp_mem_intf_addr
+	JUMP		NZ,		extend_msa
+
+hash_init:
+	; set initial values and mode
+	LOAD		s2,		00
+	LOAD		s3,		00
+	LOAD		s4,		11000000'b
+
+	OUTPUTK		00010000'b,	outp_self_status
+
+hash_loop:
+	; first output the msa address
+	OUTPUT		s3,		outp_mem_intf_addr
+	OUTPUTK		00000010'b,	outp_mem_intf_addr
+
+	; then the rc address
+	OUTPUT		s4,		outp_mem_intf_addr
+	OUTPUTK		00000001'b,	outp_mem_intf_addr
+
+	; increment addresses and coutner
+	ADD		s2,		01
+	ADD		s3,		01
+	ADD		s4,		01
+	
+	; then loop
+	COMPARE		s2,		40
+	JUMP		NZ,		hash_loop
+
+finish:
+	JUMP		finish
+
+send_data:
+	OUTPUTK		request_sync,	outp_self_status
+	ADD		s0,		00			; processor should go to sleep here
+	ADD		s0,		00			; ish
+	OUTPUTK		00,		outp_self_status
+
+send_data_loop:
+	ADD		sF,		00			; need to waste a cycle
+	SUB		s0,		01
+	FETCH		s1,		(s0)
+	OUTPUT		s1,		outp_self_data
+	COMPARE		s0,		00
+	JUMP		NZ,		send_data_loop
+	OUTPUTK		send_done,	outp_self_status
+	RETURN
+
+recv_data:
+	OUTPUTK		request_sync,	outp_self_status
+	ADD		sF,		00			; process should go to sleep here
+	ADD		sF,		00			; ish
+	OUTPUTK		00,		outp_self_status
+	ADD		sF,		00			;
+	ADD		sF,		00			; waste 4 instructions so transfer lines up
+	ADD		sF,		00			;
+	ADD		sF,		00			;
+
+recv_data_loop:
+	INPUT		s1,		inp_control_data
+	STORE		s1,		(s0)
+	ADD		s0,		01
+	INPUT		s1,		inp_system_status
+	AND		s1,		send_done
+	JUMP		Z,		recv_data_loop
+	RETURN
